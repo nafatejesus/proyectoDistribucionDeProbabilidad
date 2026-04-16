@@ -4,132 +4,152 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
+import google.generativeai as genai
+import re
 
-# Configuración visual de la página
-st.set_page_config(page_title="Z-Test Master - Estadística ITI", layout="wide")
+# Configuración de la página
+st.set_page_config(page_title="Z-Test Analyzer Pro", layout="wide")
 
+# --- FUNCIONES ESTADÍSTICAS ---
 def perform_z_test(sample_mean, pop_std, n, null_mean, alpha, alternative):
-    """Cálculos lógicos de la Prueba Z."""
     se = pop_std / np.sqrt(n)
     z_stat = (sample_mean - null_mean) / se
-    
     if alternative == 'Bilateral':
         p_value = 2 * (1 - stats.norm.cdf(abs(z_stat)))
-        z_critical = stats.norm.ppf(1 - alpha/2)
-        lower_critical, upper_critical = -z_critical, z_critical
+        z_crit = stats.norm.ppf(1 - alpha/2)
+        return z_stat, p_value, -z_crit, z_crit
     elif alternative == 'Cola Derecha':
         p_value = 1 - stats.norm.cdf(z_stat)
-        z_critical = stats.norm.ppf(1 - alpha)
-        lower_critical, upper_critical = None, z_critical
-    else: # Cola Izquierda
+        z_crit = stats.norm.ppf(1 - alpha)
+        return z_stat, p_value, None, z_crit
+    else:
         p_value = stats.norm.cdf(z_stat)
-        z_critical = stats.norm.ppf(alpha)
-        lower_critical, upper_critical = z_critical, None
-        
-    return z_stat, p_value, lower_critical, upper_critical
+        z_crit = stats.norm.ppf(alpha)
+        return z_stat, p_value, z_crit, None
 
 # --- SIDEBAR: ENTRADA DE DATOS ---
-st.sidebar.header("1. Carga de Datos")
-data_source = st.sidebar.radio("Origen:", ("Subir CSV", "Generar Datos Sintéticos"))
+st.sidebar.header("1. Entrada de Datos")
+modo = st.sidebar.radio("Origen:", ["Subir CSV", "Generar Datos de Prueba"])
 
 df = None
-
-if data_source == "Subir CSV":
-    uploaded_file = st.sidebar.file_uploader("Carga tu archivo CSV", type=["csv"])
-    if uploaded_file:
-        # Intentamos detectar el separador automáticamente (coma o punto y coma)
+if modo == "Subir CSV":
+    archivo = st.sidebar.file_uploader("Sube tu encuesta (CSV)", type=["csv"])
+    if archivo:
         try:
-            df = pd.read_csv(uploaded_file, sep=None, engine='python')
-            df.columns = [c.strip() for c in df.columns] # Limpiar espacios en nombres
-        except Exception as e:
-            st.error(f"Error al leer el archivo: {e}")
-            st.stop()
+            df = pd.read_csv(archivo, sep=None, engine='python', encoding='utf-8')
+        except:
+            df = pd.read_csv(archivo, sep=',', encoding='latin-1')
     else:
-        st.info("Sube un archivo CSV en el panel de la izquierda.")
+        st.info("Esperando archivo... Puedes usar el 'Generador' para probar la app ahora.")
         st.stop()
 else:
-    n_synth = st.sidebar.slider("Tamaño de muestra (n)", 30, 1000, 100)
-    mu_synth = st.sidebar.number_input("Media real (simulación)", value=100.0)
-    std_synth = st.sidebar.number_input("Desv. Estándar (simulación)", value=15.0)
-    df = pd.DataFrame({'datos_generados': np.random.normal(mu_synth, std_synth, n_synth)})
+    # Datos sintéticos para pruebas rápidas
+    df = pd.DataFrame({'Datos_Sinteticos': np.random.normal(100, 15, 150)})
 
-st.sidebar.header("2. Parámetros de la Prueba")
-h0_mean = st.sidebar.number_input("Media Hipotética ($H_0$)", value=100.0)
-pop_sigma = st.sidebar.number_input("$\sigma$ Poblacional (Conocida)", value=15.0, min_value=0.01)
-alpha = st.sidebar.slider("Nivel de Significancia ($\\alpha$)", 0.01, 0.10, 0.05)
-test_type = st.sidebar.selectbox("Tipo de Hipótesis", ["Bilateral", "Cola Derecha", "Cola Izquierda"])
+# --- PROCESAMIENTO ---
+st.title("🧪 Analizador Estadístico (Prueba Z)")
 
-# --- CUERPO PRINCIPAL ---
-st.title(" Aplicación de Prueba Z")
-st.markdown("---")
+col_seleccionada = st.selectbox("Selecciona la columna a analizar:", df.columns)
 
-# Selección de columna (Mostramos todas para que el usuario elija)
-target_col = st.selectbox("Selecciona la columna para el análisis:", df.columns.tolist())
+# LIMPIEZA DE DATOS
+raw_values = df[col_seleccionada].astype(str)
+clean_values = raw_values.str.extract(r'(\d+\.?\d*)')[0]
+data = pd.to_numeric(clean_values, errors='coerce').dropna()
 
-# PROCESAMIENTO CRÍTICO: Forzamos conversión a números
-data_series = pd.to_numeric(df[target_col], errors='coerce').dropna()
-
-if data_series.empty:
-    st.error(f" La columna '{target_col}' no contiene datos numéricos. Por favor, selecciona otra.")
+if data.empty:
+    st.error(f"La columna '{col_seleccionada}' no tiene valores numéricos extraíbles.")
     st.stop()
 
-# Vista previa de datos limpios
-with st.expander("Ver datos procesados"):
-    st.write(f"Registros válidos encontrados: {len(data_series)}")
-    st.write(data_series.head())
+# --- PARÁMETROS ESTADÍSTICOS ---
+st.sidebar.header("2. Parámetros de Prueba")
+h0 = st.sidebar.number_input("Media Hipotética (H0)", value=float(round(data.mean(), 2)))
+sigma = st.sidebar.number_input("Desviación Estándar Poblacional (σ)", value=15.0, min_value=0.1)
+alpha = st.sidebar.slider("Significancia (α)", 0.01, 0.10, 0.05)
+tipo = st.sidebar.selectbox("Hipótesis Alternativa", ["Bilateral", "Cola Derecha", "Cola Izquierda"])
 
-# 1. Gráficos
+# --- VISUALIZACIÓN INICIAL ---
 col1, col2 = st.columns(2)
 with col1:
-    fig1, ax1 = plt.subplots()
-    sns.histplot(data_series, kde=True, color="#2E86C1", ax=ax1)
-    ax1.set_title("Distribución de la Muestra")
-    st.pyplot(fig1)
+    fig_h, ax_h = plt.subplots()
+    sns.histplot(data, kde=True, color="skyblue", ax=ax_h)
+    ax_h.set_title("Distribución de la Muestra")
+    st.pyplot(fig_h)
 
 with col2:
-    fig2, ax2 = plt.subplots()
-    sns.boxplot(x=data_series, color="#EC7063", ax=ax2)
-    ax2.set_title("Análisis de Outliers")
-    st.pyplot(fig2)
+    fig_b, ax_b = plt.subplots()
+    sns.boxplot(x=data, color="lightcoral", ax=ax_b)
+    ax_b.set_title("Identificación de Outliers")
+    st.pyplot(fig_b)
 
-# 2. Cálculos Estadísticos
-n = len(data_series)
-x_bar = data_series.mean()
+# --- CÁLCULOS Y RESULTADOS ---
+n = len(data)
+x_bar = data.mean()
+z_calc, p_val, z_low, z_high = perform_z_test(x_bar, sigma, n, h0, alpha, tipo)
 
 st.divider()
-st.subheader(" Resultados de la Estadística")
+st.subheader("📊 Análisis de Resultados")
 
-z_calc, p_val, z_low, z_high = perform_z_test(x_bar, pop_sigma, n, h0_mean, alpha, test_type)
+c1, c2, c3 = st.columns(3)
+c1.metric("Media Muestral", round(x_bar, 4))
+c2.metric("Estadístico Z", round(z_calc, 4))
+c3.metric("P-Valor", round(p_val, 4))
 
-m1, m2, m3 = st.columns(3)
-m1.metric("Z Calculado", f"{z_calc:.4f}")
-m2.metric("Valor P", f"{p_val:.4f}")
-m3.metric("Media Muestral ($\overline{x}$)", f"{x_bar:.2f}")
-
-# 3. Conclusión
-decision = "Rechazar $H_0$" if p_val < alpha else "No Rechazar $H_0$"
-color = "green" if "No Rechazar" in decision else "red"
-
-st.markdown(f"### Decisión: :{color}[{decision}]")
+st.markdown("### Conclusión")
 if p_val < alpha:
-    st.write(f"Como el p-valor ({p_val:.4f}) < {alpha}, se rechaza la hipótesis nula.")
+    st.error(f"Decisión: Rechazar H0. Hay evidencia suficiente con un {int((1-alpha)*100)}% de confianza.")
 else:
-    st.write(f"Como el p-valor ({p_val:.4f}) >= {alpha}, no hay evidencia suficiente para rechazar $H_0$.")
+    st.success(f"Decisión: No Rechazar H0. No hay evidencia suficiente para descartar la hipótesis nula.")
 
-# 4. Gráfico de Curva Normal y Zonas de Rechazo
-st.subheader("Visualización de la Campana de Gauss")
-x_axis = np.linspace(-4, 4, 500)
-y_axis = stats.norm.pdf(x_axis, 0, 1)
-fig3, ax3 = plt.subplots(figsize=(10, 4))
-ax3.plot(x_axis, y_axis, color='black')
+# --- GRÁFICO DE CAMPANA ---
+st.subheader("Curva de Decisión")
+x = np.linspace(-4, 4, 1000)
+y = stats.norm.pdf(x, 0, 1)
+fig_z, ax_z = plt.subplots(figsize=(10, 4))
+ax_z.plot(x, y, color='black', lw=2)
 
-if test_type == 'Bilateral':
-    ax3.fill_between(x_axis, y_axis, where=(x_axis <= z_low) | (x_axis >= z_high), color='red', alpha=0.3, label='Zona de Rechazo')
-elif test_type == 'Cola Derecha':
-    ax3.fill_between(x_axis, y_axis, where=(x_axis >= z_high), color='red', alpha=0.3, label='Zona de Rechazo')
+if tipo == 'Bilateral':
+    ax_z.fill_between(x, y, where=(x <= z_low) | (x >= z_high), color='red', alpha=0.4, label='Zona de Rechazo')
+elif tipo == 'Cola Derecha':
+    ax_z.fill_between(x, y, where=(x >= z_high), color='red', alpha=0.4, label='Zona de Rechazo')
 else:
-    ax3.fill_between(x_axis, y_axis, where=(x_axis <= z_low), color='red', alpha=0.3, label='Zona de Rechazo')
+    ax_z.fill_between(x, y, where=(x <= z_low), color='red', alpha=0.4, label='Zona de Rechazo')
 
-ax3.axvline(z_calc, color='blue', linestyle='--', label=f'Z-Calculado ({z_calc:.2f})')
-ax3.legend()
-st.pyplot(fig3)
+ax_z.axvline(z_calc, color='blue', ls='--', lw=2, label=f'Z-Calculado: {z_calc:.2f}')
+ax_z.legend()
+st.pyplot(fig_z)
+
+# --- MÓDULO DE INTELIGENCIA ARTIFICIAL (GEMINI) ---
+st.divider()
+st.header("4. Asistente de IA (Google Gemini)")
+
+if st.button("Generar interpretación con IA"):
+    try:
+        # Validación de API Key
+        if "GEMINI_API_KEY" not in st.secrets:
+            st.error("No se encontró 'GEMINI_API_KEY' en los secretos de Streamlit.")
+        else:
+            # 1. Configuración
+            genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+            
+            # 2. Selección del modelo (Gemini 1.5 Flash es el recomendado por estabilidad)
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            
+            # 3. Construcción del Prompt (Variables corregidas para coincidir con tu código)
+            prompt = f"""
+            Actúa como un experto en estadística para un estudiante de ingeniería. 
+            Se realizó una prueba Z con estos resultados:
+            - Variable analizada: {col_seleccionada}
+            - Media muestral: {x_bar:.4f}
+            - Media hipotética (H0): {h0}
+            - Tamaño de muestra (n): {n}
+            - Desviación estándar poblacional (sigma): {sigma}
+            - Nivel de significancia (alpha): {alpha}
+            - Estadístico Z calculado: {z_calc:.4f}
+            - P-valor: {p_val:.4f}
+            - Tipo de hipótesis: {tipo}
+
+            ¿Se rechaza la hipótesis nula? Explica la decisión técnica comparando el P-valor contra Alpha.
+            Proporciona una interpretación profesional y lógica que el estudiante pueda incluir en su reporte.
+            """
+            
+           
