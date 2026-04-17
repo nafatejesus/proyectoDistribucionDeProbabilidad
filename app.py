@@ -118,38 +118,30 @@ ax_z.axvline(z_calc, color='blue', ls='--', lw=2, label=f'Z-Calculado: {z_calc:.
 ax_z.legend()
 st.pyplot(fig_z)
 
-# --- MÓDULO DE INTELIGENCIA ARTIFICIAL (GEMINI) ---
+# Configuración de la IA usando los secretos de Streamlit
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+model = genai.GenerativeModel('gemini-2.5-flash')
+
 st.divider()
 st.header("4. Asistente de IA (Google Gemini)")
 
 if st.button("Generar interpretación con IA"):
-    try:
-        # Validación de API Key
-        if "GEMINI_API_KEY" not in st.secrets:
-            st.error("No se encontró 'GEMINI_API_KEY' en los secretos de Streamlit.")
-        else:
-            # 1. Configuración
-            genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-            
-            # 2. Selección del modelo (Gemini 1.5 Flash es el recomendado por estabilidad)
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            
-            # 3. Construcción del Prompt (Variables corregidas para coincidir con tu código)
-            prompt = f"""
-            Actúa como un experto en estadística para un estudiante de ingeniería. 
-            Se realizó una prueba Z con estos resultados:
-            - Variable analizada: {col_seleccionada}
-            - Media muestral: {x_bar:.4f}
-            - Media hipotética (H0): {h0}
-            - Tamaño de muestra (n): {n}
-            - Desviación estándar poblacional (sigma): {sigma}
-            - Nivel de significancia (alpha): {alpha}
-            - Estadístico Z calculado: {z_calc:.4f}
-            - P-valor: {p_val:.4f}
-            - Tipo de hipótesis: {tipo}
+    prompt = f"""
+    Se realizó una prueba Z con los siguientes parámetros:
+    - Media muestral: {x_bar:.4f}
+    - Media hipotética (H0): {h0}
+    - Tamaño de muestra (n): {n}
+    - Desviación estándar (sigma): {sigma}
+    - Nivel de significancia (alpha): {alpha}
+    - Estadístico Z calculado: {z_calc:.4f}
+    - P-valor: {p_val:.4f}
 
-            ¿Se rechaza la hipótesis nula? Explica la decisión técnica comparando el P-valor contra Alpha.
-            Proporciona una interpretación profesional y lógica que el estudiante pueda incluir en su reporte.
-            """
-            
-           
+    ¿Se rechaza H0? Explica la decisión técnica y la interpretación estadística.
+    """
+    with st.spinner("Consultando a la IA..."):
+        try:
+            response = model.generate_content(prompt)
+            st.markdown("### Respuesta de la IA:")
+            st.write(response.text)
+        except Exception as e:
+            st.error(f"Error: {e}")
