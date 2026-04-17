@@ -81,6 +81,34 @@ with col2:
     ax_b.set_title("Identificación de Outliers")
     st.pyplot(fig_b)
 
+
+# --- ANÁLISIS INTERACTIVO (REQUISITO DE RÚBRICA) ---
+st.subheader("📝 Análisis de la Distribución (Autoevaluación)")
+
+col_a, col_b = st.columns(2)
+
+with col_a:
+    norm_resp = st.radio(
+        "¿La distribución parece normal?",
+        ["Selecciona una opción", "Sí, se ve acampanada", "No, está muy dispersa", "Parcialmente"],
+        help="Observa si el histograma sigue la línea de la curva KDE."
+    )
+
+with col_b:
+    outlier_resp = st.selectbox(
+        "¿Detectas Outliers?",
+        ["Selecciona una opción", "No hay valores atípicos", "Sí, hay valores aislados en el Boxplot"],
+        help="Revisa los puntos individuales fuera de los 'bigotes' del boxplot."
+    )
+
+sesgo_resp = st.text_area("Análisis de Sesgo:", placeholder="Ejemplo: Se observa un ligero sesgo a la derecha porque la cola es más larga hacia valores altos...")
+
+# Botón para guardar tu análisis en la pantalla (opcional pero se ve muy bien)
+if st.button("Fijar Análisis"):
+    st.info(f"**Análisis guardado:**\n- Normalidad: {norm_resp}\n- Outliers: {outlier_resp}\n- Comentarios: {sesgo_resp}")
+
+
+
 # --- CÁLCULOS Y RESULTADOS ---
 n = len(data)
 x_bar = data.mean()
@@ -90,7 +118,7 @@ st.divider()
 st.subheader("📊 Análisis de Resultados")
 
 c1, c2, c3 = st.columns(3)
-c1.metric("Media Muestral", round(x_bar, 4))
+c1.metric("Media Muestral (H0)", round(x_bar, 4))
 c2.metric("Estadístico Z", round(z_calc, 4))
 c3.metric("P-Valor", round(p_val, 4))
 
